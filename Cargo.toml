@@ -4,7 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-winit = "0.28"
-glutin = "0.30"
-raw-window-handle = "0.5"
-gl = "0.14"
+bytemuck = "1"
+ogl33 = { version = "0.2", features = ["debug_error_checks"] }
+ultraviolet = "0.7"
+
+# these should be dev dependencies, but i use the bin directory
+# during dev so they live here, except during a crates.io release
+beryllium = "0.13.3"
+imagine = "0.0.5"
+
+[dev-dependencies]

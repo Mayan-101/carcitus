@@ -1,96 +1,192 @@
-use std::ffi::CStr;
-use std::num::NonZeroU32;
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![allow(clippy::single_match)]
+#![allow(unused_imports)]
+#![allow(clippy::zero_ptr)]
 
-use glutin::config::ConfigTemplateBuilder;
-use glutin::context::ContextAttributesBuilder;
-use glutin::display::{Display, DisplayApiPreference};
-use glutin::prelude::*;
-use glutin::surface::{SurfaceAttributesBuilder, WindowSurface};
+const WINDOW_TITLE: &str = "Triangle: Draw Arrays";
 
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::WindowBuilder;
+use beryllium::{
+  events::Event,
+  init::InitFlags,
+  video::{CreateWinArgs, GlContextFlags, GlProfile, GlSwapInterval},
+  *,
+};
+use core::{
+  convert::{TryFrom, TryInto},
+  mem::{size_of, size_of_val},
+};
+use ogl33::*;
+
+type Vertex = [f32; 3];
+
+const VERTICES: [Vertex; 3] =
+  [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]];
+
+const VERT_SHADER: &str = r#"#version 330 core
+  layout (location = 0) in vec3 pos;
+
+  void main() {
+    gl_Position = vec4(pos.x, pos.y, pos.z, 1.0);
+  }
+"#;
+
+const FRAG_SHADER: &str = r#"#version 330 core
+  out vec4 final_color;
+
+  void main() {
+    final_color = vec4(1.0, 0.5, 0.2, 1.0);
+  }
+"#;
 
 fn main() {
-    let event_loop = EventLoop::new();
-    let window_builder = WindowBuilder::new().with_title("OpenGL in Rust on WSL");
+  let sdl = Sdl::init(InitFlags::EVERYTHING);
+  sdl.set_gl_context_major_version(3).unwrap();
+  sdl.set_gl_context_minor_version(3).unwrap();
+  sdl.set_gl_profile(GlProfile::Core).unwrap();
+  let mut flags = GlContextFlags::default();
+  if cfg!(target_os = "macos") {
+    flags |= GlContextFlags::FORWARD_COMPATIBLE;
+  }
+  // FIX 1: Corrected typo from `debug_asserts` to `debug_assertions`
+  if cfg!(debug_assertions) {
+    flags |= GlContextFlags::DEBUG;
+  }
+  sdl.set_gl_context_flags(flags).unwrap();
 
-    let window = window_builder.build(&event_loop).unwrap();
-    let raw_window = unsafe { window.raw_window_handle() };
-    let raw_display = unsafe { window.raw_display_handle() };
+  let win = sdl
+    .create_gl_window(CreateWinArgs {
+      title: WINDOW_TITLE,
+      width: 800,
+      height: 600,
+      ..Default::default()
+    })
+    .expect("couldn't make a window and context");
+  
+  // FIX 2: Removed this line. It causes a panic on WSL because the
+  // Windows Desktop Window Manager controls VSync, making this operation unsupported.
+  // win.set_swap_interval(GlSwapInterval::Vsync).unwrap();
 
-    // Create the GL display with preference (EGL first, fallback to GLX)
-    let gl_display = unsafe {
-        Display::new(
-            raw_display,
-            DisplayApiPreference::EglThenGlx(Box::new(|_| {})),
-        )
-        .unwrap()
-    };
+  unsafe {
+    load_gl_with(|f_name| win.get_proc_address(f_name.cast()));
 
-    // Build and use the config template
-    let config_template = ConfigTemplateBuilder::new().with_alpha_size(8).build();
-    let config = unsafe { gl_display.find_configs(config_template).unwrap().next().unwrap() };
+    glClearColor(0.2, 0.3, 0.3, 1.0);
 
-    // Build context attributes
-    let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window));
+    let mut vao = 0;
+    glGenVertexArrays(1, &mut vao);
+    assert_ne!(vao, 0);
+    glBindVertexArray(vao);
 
-    // Create the GL context
-    let not_current_context = unsafe { gl_display.create_context(&config, &context_attributes).unwrap() };
-
-    // Build surface attributes for the window
-    let surface_attributes = SurfaceAttributesBuilder::<WindowSurface>::new().build(
-        raw_window,
-        NonZeroU32::new(1024).unwrap(),
-        NonZeroU32::new(768).unwrap(),
+    let mut vbo = 0;
+    glGenBuffers(1, &mut vbo);
+    assert_ne!(vbo, 0);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(
+      GL_ARRAY_BUFFER,
+      size_of_val(&VERTICES) as isize,
+      VERTICES.as_ptr().cast(),
+      GL_STATIC_DRAW,
     );
 
-    // Create the window surface
-    let gl_surface = unsafe { gl_display.create_window_surface(&config, &surface_attributes).unwrap() };
+    glVertexAttribPointer(
+      0,
+      3,
+      GL_FLOAT,
+      GL_FALSE,
+      size_of::<Vertex>().try_into().unwrap(),
+      0 as *const _,
+    );
+    glEnableVertexAttribArray(0);
 
-    // Make the context current on the surface
-    let current_context = unsafe { not_current_context.make_current(&gl_surface).unwrap() };
-
-    // Load OpenGL function pointers
-    gl::load_with(|symbol| {
-        let c_string = std::ffi::CString::new(symbol).unwrap();
-        gl_display.get_proc_address(&c_string) as *const _
-    });
-
-    // Print OpenGL version
-    unsafe {
-        let version = CStr::from_ptr(gl::GetString(gl::VERSION) as *const i8).to_str().unwrap();
-        println!("OpenGL version: {}", version);
+    let vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+    assert_ne!(vertex_shader, 0);
+    glShaderSource(
+      vertex_shader,
+      1,
+      &(VERT_SHADER.as_bytes().as_ptr().cast()),
+      &(VERT_SHADER.len().try_into().unwrap()),
+    );
+    glCompileShader(vertex_shader);
+    let mut success = 0;
+    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &mut success);
+    if success == 0 {
+      let mut v: Vec<u8> = Vec::with_capacity(1024);
+      let mut log_len = 0_i32;
+      glGetShaderInfoLog(
+        vertex_shader,
+        1024,
+        &mut log_len,
+        v.as_mut_ptr().cast(),
+      );
+      v.set_len(log_len.try_into().unwrap());
+      panic!("Vertex Compile Error: {}", String::from_utf8_lossy(&v));
     }
 
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
+    let fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+    assert_ne!(fragment_shader, 0);
+    glShaderSource(
+      fragment_shader,
+      1,
+      &(FRAG_SHADER.as_bytes().as_ptr().cast()),
+      &(FRAG_SHADER.len().try_into().unwrap()),
+    );
+    glCompileShader(fragment_shader);
+    let mut success = 0;
+    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &mut success);
+    if success == 0 {
+      let mut v: Vec<u8> = Vec::with_capacity(1024);
+      let mut log_len = 0_i32;
+      glGetShaderInfoLog(
+        fragment_shader,
+        1024,
+        &mut log_len,
+        v.as_mut_ptr().cast(),
+      );
+      v.set_len(log_len.try_into().unwrap());
+      panic!("Fragment Compile Error: {}", String::from_utf8_lossy(&v));
+    }
 
-        match event {
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                *control_flow = ControlFlow::Exit;
-            },
-            Event::WindowEvent { event: WindowEvent::Resized(size), .. } => {
-                if size.width != 0 && size.height != 0 {
-                    gl_surface.resize(
-                        &current_context,
-                        NonZeroU32::new(size.width).unwrap(),
-                        NonZeroU32::new(size.height).unwrap(),
-                    );
-                }
-            },
-            Event::MainEventsCleared => {
-                window.request_redraw();
-            },
-            Event::RedrawRequested(_) => {
-                unsafe {
-                    gl::ClearColor(0.2, 0.3, 0.3, 1.0);
-                    gl::Clear(gl::COLOR_BUFFER_BIT);
-                }
-                gl_surface.swap_buffers(&current_context).unwrap();
-            },
-            _ => (),
-        }
-    });
+    let shader_program = glCreateProgram();
+    assert_ne!(shader_program, 0);
+    glAttachShader(shader_program, vertex_shader);
+    glAttachShader(shader_program, fragment_shader);
+    glLinkProgram(shader_program);
+    let mut success = 0;
+    glGetProgramiv(shader_program, GL_LINK_STATUS, &mut success);
+    if success == 0 {
+      let mut v: Vec<u8> = Vec::with_capacity(1024);
+      let mut log_len = 0_i32;
+      glGetProgramInfoLog(
+        shader_program,
+        1024,
+        &mut log_len,
+        v.as_mut_ptr().cast(),
+      );
+      v.set_len(log_len.try_into().unwrap());
+      panic!("Program Link Error: {}", String::from_utf8_lossy(&v));
+    }
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
+
+    glUseProgram(shader_program);
+  }
+
+  'main_loop: loop {
+    // handle events this frame
+    while let Some((event, _timestamp)) = sdl.poll_events() {
+      match event {
+        Event::Quit => break 'main_loop,
+        _ => (),
+      }
+    }
+    // now the events are clear.
+
+    // here's where we could change the world state if we had some.
+
+    // and then draw!
+    unsafe {
+      glClear(GL_COLOR_BUFFER_BIT);
+      glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+    win.swap_window();
+  }
 }
