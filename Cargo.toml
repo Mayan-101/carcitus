@@ -1,0 +1,10 @@
+[package]
+name = "opengl_rust"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+winit = "0.28"
+glutin = "0.30"
+raw-window-handle = "0.5"
+gl = "0.14"
