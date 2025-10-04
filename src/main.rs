@@ -62,9 +62,7 @@ fn main() {
     })
     .expect("couldn't make a window and context");
   
-  // FIX 2: Removed this line. It causes a panic on WSL because the
-  // Windows Desktop Window Manager controls VSync, making this operation unsupported.
-  // win.set_swap_interval(GlSwapInterval::Vsync).unwrap();
+
 
   unsafe {
     load_gl_with(|f_name| win.get_proc_address(f_name.cast()));
