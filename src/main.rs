@@ -8,21 +8,23 @@ const WINDOW_TITLE: &str = "Triangle: Draw Arrays";
 use beryllium::{
   events::Event,
   init::InitFlags,
-  video::{CreateWinArgs, GlContextFlags, GlProfile, GlSwapInterval},
+  video::{CreateWinArgs, GlContextFlags, GlProfile},
   *,
 };
 use core::{
   convert::{TryFrom, TryInto},
   mem::{size_of, size_of_val},
 };
-use ogl33::*;
+use std::ffi::CString;
+use gl::types::*;
+use gl;
 
 type Vertex = [f32; 3];
 
 const VERTICES: [Vertex; 3] =
   [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]];
 
-const VERT_SHADER: &str = r#"#version 330 core
+const VERT_SHADER: &str = r#"#version 450 core
   layout (location = 0) in vec3 pos;
 
   void main() {
@@ -30,7 +32,7 @@ const VERT_SHADER: &str = r#"#version 330 core
   }
 "#;
 
-const FRAG_SHADER: &str = r#"#version 330 core
+const FRAG_SHADER: &str = r#"#version 450 core
   out vec4 final_color;
 
   void main() {
@@ -40,14 +42,15 @@ const FRAG_SHADER: &str = r#"#version 330 core
 
 fn main() {
   let sdl = Sdl::init(InitFlags::EVERYTHING);
-  sdl.set_gl_context_major_version(3).unwrap();
-  sdl.set_gl_context_minor_version(3).unwrap();
+  
+  sdl.set_gl_context_major_version(4).unwrap();
+  sdl.set_gl_context_minor_version(5).unwrap();
   sdl.set_gl_profile(GlProfile::Core).unwrap();
+
   let mut flags = GlContextFlags::default();
   if cfg!(target_os = "macos") {
     flags |= GlContextFlags::FORWARD_COMPATIBLE;
   }
-  // FIX 1: Corrected typo from `debug_asserts` to `debug_assertions`
   if cfg!(debug_assertions) {
     flags |= GlContextFlags::DEBUG;
   }
@@ -62,54 +65,66 @@ fn main() {
     })
     .expect("couldn't make a window and context");
   
-
+  // FIX 1: Declare `vao` here so it's accessible in the main loop.
+  let mut vao = 0;
 
   unsafe {
-    load_gl_with(|f_name| win.get_proc_address(f_name.cast()));
+    gl::load_with(|s| {
+        let c_str = CString::new(s).unwrap();
+        win.get_proc_address(c_str.as_ptr().cast())
+    });
 
-    glClearColor(0.2, 0.3, 0.3, 1.0);
+    // It's also good practice to set the viewport.
+    // This tells OpenGL how to map its coordinates to the window's pixels.
+    gl::Viewport(0, 0, 800, 600);
 
-    let mut vao = 0;
-    glGenVertexArrays(1, &mut vao);
+    gl::ClearColor(0.2, 0.3, 0.3, 1.0);
+
+    // `vao` is now initialized inside the unsafe block
+    gl::GenVertexArrays(1, &mut vao);
     assert_ne!(vao, 0);
-    glBindVertexArray(vao);
+    gl::BindVertexArray(vao);
 
     let mut vbo = 0;
-    glGenBuffers(1, &mut vbo);
+    gl::GenBuffers(1, &mut vbo);
     assert_ne!(vbo, 0);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(
-      GL_ARRAY_BUFFER,
+    gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+    gl::BufferData(
+      gl::ARRAY_BUFFER,
       size_of_val(&VERTICES) as isize,
       VERTICES.as_ptr().cast(),
-      GL_STATIC_DRAW,
+      gl::STATIC_DRAW,
     );
 
-    glVertexAttribPointer(
+    gl::VertexAttribPointer(
       0,
       3,
-      GL_FLOAT,
-      GL_FALSE,
+      gl::FLOAT,
+      gl::FALSE,
       size_of::<Vertex>().try_into().unwrap(),
       0 as *const _,
     );
-    glEnableVertexAttribArray(0);
+    gl::EnableVertexAttribArray(0);
 
-    let vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+    // Unbind the VBO and VAO after setup (good practice)
+    gl::BindBuffer(gl::ARRAY_BUFFER, 0);
+    gl::BindVertexArray(0);
+
+    let vertex_shader = gl::CreateShader(gl::VERTEX_SHADER);
     assert_ne!(vertex_shader, 0);
-    glShaderSource(
+    gl::ShaderSource(
       vertex_shader,
       1,
       &(VERT_SHADER.as_bytes().as_ptr().cast()),
       &(VERT_SHADER.len().try_into().unwrap()),
     );
-    glCompileShader(vertex_shader);
+    gl::CompileShader(vertex_shader);
     let mut success = 0;
-    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &mut success);
+    gl::GetShaderiv(vertex_shader, gl::COMPILE_STATUS, &mut success);
     if success == 0 {
       let mut v: Vec<u8> = Vec::with_capacity(1024);
       let mut log_len = 0_i32;
-      glGetShaderInfoLog(
+      gl::GetShaderInfoLog(
         vertex_shader,
         1024,
         &mut log_len,
@@ -119,21 +134,21 @@ fn main() {
       panic!("Vertex Compile Error: {}", String::from_utf8_lossy(&v));
     }
 
-    let fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+    let fragment_shader = gl::CreateShader(gl::FRAGMENT_SHADER);
     assert_ne!(fragment_shader, 0);
-    glShaderSource(
+    gl::ShaderSource(
       fragment_shader,
       1,
       &(FRAG_SHADER.as_bytes().as_ptr().cast()),
       &(FRAG_SHADER.len().try_into().unwrap()),
     );
-    glCompileShader(fragment_shader);
+    gl::CompileShader(fragment_shader);
     let mut success = 0;
-    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &mut success);
+    gl::GetShaderiv(fragment_shader, gl::COMPILE_STATUS, &mut success);
     if success == 0 {
       let mut v: Vec<u8> = Vec::with_capacity(1024);
       let mut log_len = 0_i32;
-      glGetShaderInfoLog(
+      gl::GetShaderInfoLog(
         fragment_shader,
         1024,
         &mut log_len,
@@ -143,17 +158,17 @@ fn main() {
       panic!("Fragment Compile Error: {}", String::from_utf8_lossy(&v));
     }
 
-    let shader_program = glCreateProgram();
+    let shader_program = gl::CreateProgram();
     assert_ne!(shader_program, 0);
-    glAttachShader(shader_program, vertex_shader);
-    glAttachShader(shader_program, fragment_shader);
-    glLinkProgram(shader_program);
+    gl::AttachShader(shader_program, vertex_shader);
+    gl::AttachShader(shader_program, fragment_shader);
+    gl::LinkProgram(shader_program);
     let mut success = 0;
-    glGetProgramiv(shader_program, GL_LINK_STATUS, &mut success);
+    gl::GetProgramiv(shader_program, gl::LINK_STATUS, &mut success);
     if success == 0 {
       let mut v: Vec<u8> = Vec::with_capacity(1024);
       let mut log_len = 0_i32;
-      glGetProgramInfoLog(
+      gl::GetProgramInfoLog(
         shader_program,
         1024,
         &mut log_len,
@@ -162,28 +177,27 @@ fn main() {
       v.set_len(log_len.try_into().unwrap());
       panic!("Program Link Error: {}", String::from_utf8_lossy(&v));
     }
-    glDeleteShader(vertex_shader);
-    glDeleteShader(fragment_shader);
+    gl::DeleteShader(vertex_shader);
+    gl::DeleteShader(fragment_shader);
 
-    glUseProgram(shader_program);
+    gl::UseProgram(shader_program);
   }
 
   'main_loop: loop {
-    // handle events this frame
     while let Some((event, _timestamp)) = sdl.poll_events() {
       match event {
         Event::Quit => break 'main_loop,
         _ => (),
       }
     }
-    // now the events are clear.
 
-    // here's where we could change the world state if we had some.
-
-    // and then draw!
     unsafe {
-      glClear(GL_COLOR_BUFFER_BIT);
-      glDrawArrays(GL_TRIANGLES, 0, 3);
+      gl::Clear(gl::COLOR_BUFFER_BIT);
+      
+      // FIX 2: Bind the VAO to make it the active one for drawing.
+      gl::BindVertexArray(vao);
+      
+      gl::DrawArrays(gl::TRIANGLES, 0, 3);
     }
     win.swap_window();
   }
