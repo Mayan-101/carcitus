@@ -5,18 +5,9 @@ edition = "2024"
 
 [dependencies]
 bytemuck = "1"
-# Remove or comment out ogl33
-# ogl33 = { version = "0.2", features = ["debug_error_checks"] }
 ultraviolet = "0.7"
-
-# Use the 'gl' crate for raw OpenGL bindings
-gl = "0.14.0" # Use the latest stable version
-
-# You'll need a GL loader. `gl_loader` is a good choice.
-# This will load OpenGL function pointers at runtime.
+gl = "0.14.0"
 gl_loader = "0.1.0" 
-
-# These remain as they are for windowing
 beryllium = "0.13.3"
 imagine = "0.0.5"
 

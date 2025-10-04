@@ -65,7 +65,6 @@ fn main() {
     })
     .expect("couldn't make a window and context");
   
-  // FIX 1: Declare `vao` here so it's accessible in the main loop.
   let mut vao = 0;
 
   unsafe {
@@ -73,14 +72,11 @@ fn main() {
         let c_str = CString::new(s).unwrap();
         win.get_proc_address(c_str.as_ptr().cast())
     });
-
-    // It's also good practice to set the viewport.
-    // This tells OpenGL how to map its coordinates to the window's pixels.
+    
     gl::Viewport(0, 0, 800, 600);
 
     gl::ClearColor(0.2, 0.3, 0.3, 1.0);
 
-    // `vao` is now initialized inside the unsafe block
     gl::GenVertexArrays(1, &mut vao);
     assert_ne!(vao, 0);
     gl::BindVertexArray(vao);
@@ -106,7 +102,6 @@ fn main() {
     );
     gl::EnableVertexAttribArray(0);
 
-    // Unbind the VBO and VAO after setup (good practice)
     gl::BindBuffer(gl::ARRAY_BUFFER, 0);
     gl::BindVertexArray(0);
 
@@ -194,7 +189,6 @@ fn main() {
     unsafe {
       gl::Clear(gl::COLOR_BUFFER_BIT);
       
-      // FIX 2: Bind the VAO to make it the active one for drawing.
       gl::BindVertexArray(vao);
       
       gl::DrawArrays(gl::TRIANGLES, 0, 3);
